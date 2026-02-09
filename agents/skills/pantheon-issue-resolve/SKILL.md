@@ -9,8 +9,8 @@ description: "Evidence-first issue resolution workflow: analyze deeply, implemen
 
 A rigorous, evidence-first workflow for resolving software issues or improving existing PRs. The workflow consists of:
 
-1. **Deep Analysis** → Understand root cause and design solution (can use opus for stronger reasoning)
-2. **Implementation** → Execute the solution design (can use sonnet for efficiency)
+1. **Deep Analysis** → Understand root cause and design solution
+2. **Implementation** → Execute the solution design
 3. **Review** → P0/P1 bug hunt on the changes
 4. **Verify** → Triage findings and scope decisions
 5. **Fix Loop** → Iterate until no in-scope blockers remain
@@ -96,13 +96,10 @@ pr_head_branch = None      # Set after Step 2
 
 **Purpose**: Sync code, analyze deeply, and design solution (or conclude no action needed).
 
-**Model recommendation**: Use `opus` for stronger analytical reasoning.
-
 **Call**: `functions.mcp__pantheon__parallel_explore`
-- `agent`: `"codex"`
+- `agent`: `"claude_code"`
 - `num_branches`: `1`
 - `parent_branch_id`: `baseline_branch_id`
-- `model`: `"opus"` (optional, for better analysis)
 
 **Prompt**:
 
@@ -154,12 +151,7 @@ VERDICT=NEED_FIX
 BEGIN_SOLUTION_DESIGN
 root_cause: <one-line root cause>
 severity: <P0 / P1 / P2 / feature>
-approach: <solution approach using KISS principle>
-files_to_change:
-  - file: <path>
-    changes: <what to change and why>
-  - file: <path>
-    changes: <what to change and why>
+approach: <clear, concise solution using KISS principle; describe what to change and why>
 test_strategy: <how to verify the fix>
 risks: <potential risks or edge cases>
 alternatives_rejected: <why other approaches were not chosen>
@@ -181,13 +173,10 @@ END_SOLUTION_DESIGN
 
 **Purpose**: Execute the solution design from Step 1.
 
-**Model recommendation**: Use `sonnet` for cost-efficiency (analysis is already done).
-
 **Call**: `functions.mcp__pantheon__parallel_explore`
-- `agent`: `"codex"`
+- `agent`: `"claude_code"`
 - `num_branches`: `1`
 - `parent_branch_id`: `analysis_branch_id`
-- `model`: `"sonnet"` (optional)
 
 **Prompt**:
 
@@ -202,12 +191,11 @@ The analysis phase has identified the following solution:
 
 Implement the solution following the design above:
 
-1. Follow the approach exactly as designed
-2. Make changes to the files listed, in the manner described
-3. Apply KISS principle: accurate, rigorous, and concise
-4. Self-review your diff (correctness, edge cases, compatibility)
-5. Run the smallest relevant tests/build to verify basic functionality
-6. Manage the PR:
+1. Understand and follow the approach described in the design
+2. Apply KISS principle: accurate, rigorous, and concise
+3. Self-review your diff (correctness, edge cases, compatibility)
+4. Run the smallest relevant tests/build to verify basic functionality
+5. Manage the PR:
 
    [IF starting from issue_link (no existing PR)]:
    - Create a NEW PR using `gh pr create`
@@ -393,14 +381,12 @@ For EACH finding, perform the following triage:
 For every finding marked DEFER_CREATE_ISSUE:
 
 1. Extract repo name:
-   ```bash
+
    REPO=$(gh pr view {pr_number} --json baseRepository --jq .baseRepository.nameWithOwner)
-   ```
 
 2. Search for existing issues (avoid duplicates):
-   ```bash
+
    gh issue list -R "$REPO" --search "<keywords> in:title,body state:open" --limit 10
-   ```
 
 3. If matching open issue exists:
    - Do NOT create new issue
@@ -408,26 +394,25 @@ For every finding marked DEFER_CREATE_ISSUE:
    - Use existing issue URL
 
 4. If no match, create new issue:
-   ```bash
+
    gh issue create -R "$REPO" --title "<title>" --body "<body>"
-   ```
-   - Body must include: code evidence, repro steps, impact, link to PR #{pr_number}
+
+   Body must include: code evidence, repro steps, impact, link to PR #{pr_number}
 
 === PR COMMENT (IDEMPOTENT) ===
 
 Post ONE summary comment on the PR (idempotent per PR HEAD SHA):
 
 1. Get PR HEAD SHA:
-   ```bash
+
    HEAD_SHA=$(gh pr view {pr_number} --json headRefOid --jq .headRefOid)
-   ```
 
 2. Check if comment already exists:
-   - Search for existing comment containing `<!-- pantheon-verify:$HEAD_SHA -->`
+   - Search for existing comment containing HTML comment: <!-- pantheon-verify:$HEAD_SHA -->
    - If found, do NOT post again
 
 3. Post comment via stdin (preserves formatting):
-   ```bash
+
    gh pr comment {pr_number} --body-file - <<'EOF'
    <!-- pantheon-verify:$HEAD_SHA -->
 
@@ -442,7 +427,6 @@ Post ONE summary comment on the PR (idempotent per PR HEAD SHA):
    ### ❌ INVALID_OR_ALREADY_FIXED
    <brief rationale for each>
    EOF
-   ```
 
 === OUTPUT ===
 
@@ -484,7 +468,7 @@ END WHILE
 **5.1: Fix In-Scope Issues**
 
 **Call**: `functions.mcp__pantheon__parallel_explore`
-- `agent`: `"codex"`
+- `agent`: `"claude_code"`
 - `num_branches`: `1`
 - `parent_branch_id`: `last_fix_branch_id`
 
@@ -677,7 +661,8 @@ If Step 5 (Fix Loop) iterates more than **5 times**:
 
 ## Notes
 
-- **Model selection**: Step 1 (Analysis) benefits from `opus`; other steps can use `sonnet` for efficiency
-- **Parallel explorations**: This workflow uses sequential explorations by design (each depends on previous results)
-- **Cost optimization**: Using `sonnet` for implementation/review/verify saves significant cost vs `opus` everywhere
+- **Agent selection**:
+  - Steps 1, 2, 5.1 (Analysis, Implementation, Fix): Use `agent="claude_code"` for coding tasks
+  - Steps 3, 4 (Review, Verify): Use `agent="codex"` for analytical/review tasks
+- **Sequential explorations**: This workflow uses sequential explorations by design (each depends on previous results)
 - **Extensibility**: This workflow can be extended to support refactoring, performance optimization, or feature development (not just bug fixes)
