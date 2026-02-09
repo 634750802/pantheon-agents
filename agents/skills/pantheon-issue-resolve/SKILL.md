@@ -67,26 +67,47 @@ All severity claims must include code-causal evidence + reachability analysis + 
 
 - **Evidence bar**: Borderline P1/P2 defaults to P1 unless impact is clearly narrow or edge-case only.
 
-## Inputs
+## Inputs & Setup
 
-Provide **exactly ONE** of the following entry points:
+**Parse the `task_description` to extract:**
 
-- `issue_link` (string): GitHub issue URL or identifier
-- `existing_pr_link` (string): GitHub PR URL or number
+1. **Entry point** (exactly ONE of):
+   - `issue_link`: GitHub issue URL or identifier → set `entry_mode = "new_issue"`
+   - `existing_pr_link`: GitHub PR URL or number → set `entry_mode = "existing_pr"`
 
-**Required parameters:**
-- `project_name` (string): Pantheon project name
-- `parent_branch_id` (string): Starting Pantheon branch ID (sandbox baseline)
+2. **Required Pantheon context:**
+   - `parent_branch_id`: Starting Pantheon branch ID (sandbox baseline)
 
-**Variable initialization:**
+**Pre-workflow setup:**
+
+If `entry_mode = "existing_pr"`:
+1. Extract PR metadata:
+   ```bash
+   gh pr view {existing_pr_link} --json number,url,headRefName,body
+   ```
+2. Set: `pr_number`, `pr_url`, `pr_head_branch`
+3. Try to extract issue link from PR body/title (look for "Fixes #123", "Closes https://...")
+4. If no issue found: set `issue_link = existing_pr_link`
+
+**Initialize workflow variables:**
 ```python
-# At workflow start:
+# Entry tracking
+entry_mode = "new_issue" or "existing_pr"
+issue_link = <extracted from task>
+existing_pr_link = <extracted or None>
+
+# Branch tracking
 baseline_branch_id = parent_branch_id
 analysis_branch_id = None  # Set after Step 1
-last_fix_branch_id = None  # Set after Step 2, updated after each Fix
-pr_number = None           # Set after Step 2
-pr_url = None              # Set after Step 2
-pr_head_branch = None      # Set after Step 2
+last_fix_branch_id = None  # Set after Step 2 or skipped if existing_pr
+
+# PR tracking (pre-filled if existing_pr, otherwise set after Step 2)
+pr_number = <extracted or None>
+pr_url = <extracted or None>
+pr_head_branch = <extracted or None>
+
+# Metrics
+review_cycle_count = 0  # Increment each time Step 5.1 executes
 ```
 
 ## Workflow
@@ -100,24 +121,21 @@ pr_head_branch = None      # Set after Step 2
 - `num_branches`: `1`
 - `parent_branch_id`: `baseline_branch_id`
 
-**Prompt**:
+**Construct prompt based on `entry_mode`:**
+
+**If `entry_mode = "new_issue"` (analyzing an issue):**
 
 ```
 === PHASE 1: SYNC CODE ===
 
-Sync to the latest code:
-- If starting from issue ({issue_link}): pull latest from master branch
-- If starting from existing PR ({existing_pr_link}): checkout the PR branch
-
-Input context:
-- Issue: {issue_link} (if provided)
-- Existing PR: {existing_pr_link} (if provided)
+Pull the latest code from master branch.
 
 === PHASE 2: DEEP ANALYSIS ===
 
-Analyze the target with scientific rigor. Default stance: every claim may be invalid until evidence proves otherwise.
+Analyze issue: {issue_link}
 
-[IF starting from issue_link]:
+Apply scientific rigor. Default stance: every claim may be invalid until evidence proves otherwise.
+
 1. Restate the issue claim precisely (expected vs actual, triggering inputs/config)
 2. Locate relevant code paths and exact conditions to reach them
 3. Determine reachability under default/common production configs
@@ -125,19 +143,11 @@ Analyze the target with scientific rigor. Default stance: every claim may be inv
 5. Search for counter-evidence (feature gates, guards, fallbacks, test-only paths, unreachable branches)
 6. Assess impact and blast radius (unavailability, correctness, data safety, security, performance)
 7. Check for broader systemic issues (same pattern elsewhere, shared abstractions)
-
-[IF starting from existing_pr_link]:
-1. Understand the PR's intent and current implementation
-2. Analyze code changes (what changed, why, impact)
-3. Identify potential issues or improvement opportunities
-4. Assess code quality, edge cases, and compatibility
-
-[FOR BOTH]:
-- If the report mentions a failing test, identify the minimal failing case and rerun it on current HEAD to confirm repro (or prove non-repro). Capture exact failure output.
+8. If the report mentions a failing test, identify the minimal failing case and rerun it on current HEAD to confirm repro (or prove non-repro)
 
 === PHASE 3: CONCLUSION ===
 
-Based on your analysis, output exactly ONE of the following:
+Output exactly ONE of:
 
 --- Option A: No action needed ---
 VERDICT=NO_ACTION_NEEDED
@@ -145,7 +155,6 @@ REASON=<brief explanation: not a bug / already fixed / duplicate / out of scope 
 
 --- Option B: Action required ---
 VERDICT=NEED_FIX
-(or VERDICT=NEED_IMPROVEMENT if starting from existing_pr_link)
 
 BEGIN_SOLUTION_DESIGN
 root_cause: <one-line root cause>
@@ -157,20 +166,68 @@ alternatives_rejected: <why other approaches were not chosen>
 END_SOLUTION_DESIGN
 ```
 
+**If `entry_mode = "existing_pr"` (analyzing an existing PR):**
+
+```
+=== PHASE 1: SYNC CODE ===
+
+Checkout the existing PR branch: {pr_head_branch}
+
+=== PHASE 2: DEEP ANALYSIS ===
+
+Analyze existing PR: {existing_pr_link}
+Associated issue (if any): {issue_link}
+
+Apply scientific rigor. Default stance: assume the PR may not need changes unless evidence proves otherwise.
+
+1. Understand the PR's intent and current implementation
+2. Analyze code changes (what changed, why, impact)
+3. Identify potential issues or improvement opportunities
+4. Assess code quality, edge cases, and compatibility
+5. If there's an associated failing test, rerun it on current PR HEAD to verify status
+
+=== PHASE 3: CONCLUSION ===
+
+Output exactly ONE of:
+
+--- Option A: No action needed ---
+VERDICT=NO_ACTION_NEEDED
+REASON=<brief explanation: PR is good / already addresses issue / no improvements needed>
+
+--- Option B: Action required ---
+VERDICT=NEED_FIX
+
+BEGIN_SOLUTION_DESIGN
+root_cause: <what needs improvement in the PR>
+severity: <P0 / P1 / P2 / enhancement>
+approach: <clear, concise improvement using KISS principle; describe what to change and why>
+test_strategy: <how to verify the improvement>
+risks: <potential risks or edge cases>
+alternatives_rejected: <why other approaches were not chosen>
+END_SOLUTION_DESIGN
+```
+
 **Wait for completion** (see Waiting/Polling), then:
 
 1. Parse output
 2. Set `analysis_branch_id = <branch_id from Step 1>`
 3. If `VERDICT=NO_ACTION_NEEDED`: **Stop workflow**
-4. If `VERDICT=NEED_FIX` or `VERDICT=NEED_IMPROVEMENT`:
+4. If `VERDICT=NEED_FIX`:
    - Extract `SOLUTION_DESIGN` block (everything between BEGIN and END)
-   - Proceed to Step 2
+   - **If `entry_mode = "new_issue"`**: proceed to Step 2
+   - **If `entry_mode = "existing_pr"`**:
+     - Set `last_fix_branch_id = analysis_branch_id`
+     - Store the `SOLUTION_DESIGN` as if it were `IN_SCOPE_P0_P1` findings
+     - Skip Steps 2, 3, 4 (PR exists, no need to create/review/verify yet)
+     - Go directly to Step 5.1 (Fix) to implement the improvements on the existing PR
 
 ---
 
 ### Step 2: Implement Solution
 
-**Purpose**: Execute the solution design from Step 1.
+**Purpose**: Execute the solution design from Step 1 and create a new PR.
+
+**Note**: This step is **only executed when `entry_mode = "new_issue"`**. If `entry_mode = "existing_pr"`, skip this step (PR already exists).
 
 **Call**: `functions.mcp__pantheon__parallel_explore`
 - `agent`: `"claude_code"`
@@ -194,18 +251,10 @@ Implement the solution following the design above:
 2. Apply KISS principle: accurate, rigorous, and concise
 3. Self-review your diff (correctness, edge cases, compatibility)
 4. Run the smallest relevant tests/build to verify basic functionality
-5. Manage the PR:
-
-   [IF starting from issue_link (no existing PR)]:
-   - Create a NEW PR using `gh pr create`
+5. Create a NEW PR:
+   - Use `gh pr create`
    - Include a clear title and description referencing {issue_link}
-
-   [IF starting from existing_pr_link]:
-   - Checkout the existing PR branch: `gh pr checkout {existing_pr_link}`
-   - Commit your changes
-   - Push to the existing branch: `git push`
-
-7. Handle GitHub CLI auth:
+6. Handle GitHub CLI auth:
    - If `gh` is unauthorized (token expired/invalid), retry once
    - If still unauthorized: commit locally, keep the branch, and output GH_AUTH_EXPIRED mode
 
@@ -271,7 +320,7 @@ REASON=<why the design doesn't work; requires re-analysis>
 **Prompt**:
 
 ```
-Review PR #{pr_number} for issue {issue_link} with scientific rigor.
+Review PR #{pr_number} (related to: {issue_link}) with scientific rigor.
 
 === REVIEW PRINCIPLES ===
 
@@ -409,25 +458,25 @@ Post ONE summary comment on the PR (idempotent per PR HEAD SHA):
    HEAD_SHA=$(gh pr view {pr_number} --json headRefOid --jq .headRefOid)
 
 2. Check if comment already exists:
-   - Search for existing comment containing HTML comment: <!-- pantheon-verify:$HEAD_SHA -->
-   - If found, do NOT post again
+   - Search for existing comment containing: `<!-- pantheon-verify:$HEAD_SHA -->`
+   - If found, do NOT post again (comment is idempotent per SHA)
 
 3. Post comment via stdin (preserves formatting):
 
    gh pr comment {pr_number} --body-file - <<'EOF'
-   <!-- pantheon-verify:$HEAD_SHA -->
+<!-- pantheon-verify:$HEAD_SHA -->
 
-   ## Review Verification Summary
+## Review Verification Summary
 
-   ### ✅ FIX_IN_THIS_PR (blocking merge)
-   <list each item with: severity, brief rationale, difficulty/risk>
+### ✅ FIX_IN_THIS_PR (blocking merge)
+<list each item with: severity, brief rationale, difficulty/risk>
 
-   ### 📋 DEFER_CREATE_ISSUE (tracked separately)
-   <list each item with: issue link, brief rationale>
+### 📋 DEFER_CREATE_ISSUE (tracked separately)
+<list each item with: issue link, brief rationale>
 
-   ### ❌ INVALID_OR_ALREADY_FIXED
-   <brief rationale for each>
-   EOF
+### ❌ INVALID_OR_ALREADY_FIXED
+<brief rationale for each>
+EOF
 
 === OUTPUT ===
 
@@ -475,7 +524,9 @@ END WHILE
 - `num_branches`: `1`
 - `parent_branch_id`: `last_fix_branch_id`
 
-**Prompt**:
+**Construct prompt based on context:**
+
+**If coming from Step 4 (Verify) - normal Fix loop:**
 
 ```
 Fix the following in-scope P0/P1 issues for PR #{pr_number}:
@@ -512,11 +563,48 @@ LOCAL_COMMIT=<sha>
 RETRY_PUSH_BRANCH={pr_head_branch}
 ```
 
+**If coming from Step 1 with `entry_mode = "existing_pr"` - first improvement:**
+
+```
+Improve the existing PR #{pr_number} based on the following analysis:
+
+=== SOLUTION DESIGN ===
+
+{paste entire SOLUTION_DESIGN block from Step 1}
+
+=== REQUIREMENTS ===
+
+1. Implement improvements following the design using KISS principle
+2. Do NOT introduce new bugs or regressions
+3. Self-review your changes
+4. Run smallest relevant tests/build
+
+5. PR Management:
+   - Checkout existing PR branch: `gh pr checkout {pr_number}` (or `git checkout {pr_head_branch}`)
+   - Commit your improvements
+   - Push to existing branch: `git push`
+
+6. Handle GitHub CLI auth:
+   - If `gh` unauthorized: retry once
+   - If still unauthorized: commit locally, output GH_AUTH_EXPIRED mode
+
+=== OUTPUT ===
+
+Success mode:
+FIX_SUCCESS
+
+GH auth expired mode:
+GH_AUTH_EXPIRED
+LOCAL_COMMIT=<sha>
+RETRY_PUSH_BRANCH={pr_head_branch}
+```
+
 **Wait for completion**, then:
 
 1. Set `last_fix_branch_id = <branch_id from this Fix run>`
+2. Increment `review_cycle_count += 1`
 
-2. If `GH_AUTH_EXPIRED`:
+4. If `GH_AUTH_EXPIRED`:
    - Start recovery exploration from `last_fix_branch_id`:
      ```
      Do NOT change code. Use existing local commits.
@@ -525,7 +613,7 @@ RETRY_PUSH_BRANCH={pr_head_branch}
      ```
    - Wait for completion
 
-3. Proceed to 5.2
+5. Proceed to 5.2
 
 **5.2: Re-Review**
 
@@ -569,7 +657,7 @@ This PR has been analyzed and iterated through the Fix/Review/Verify loop until 
 **Workflow Summary:**
 - Issue analyzed: {issue_link}
 - PR created/updated: #{pr_number}
-- Review cycles completed: {number_of_review_cycles}
+- Review cycles completed: {review_cycle_count}
 
 ---
 🤖 Automated by [pantheon-issue-resolve](https://github.com/pingcap-inc/pantheon-agents/tree/main/agents/skills/pantheon-issue-resolve)
@@ -577,10 +665,10 @@ EOF
 )"
 ```
 
-**Note**: Replace placeholders with actual values:
-- `{issue_link}`: The original issue link
-- `{pr_number}`: The PR number
-- `{number_of_review_cycles}`: Count of how many Review/Verify iterations were performed
+**Replace placeholders with actual variable values:**
+- `{issue_link}` → value of `issue_link` variable
+- `{pr_number}` → value of `pr_number` variable
+- `{review_cycle_count}` → value of `review_cycle_count` variable
 
 ---
 
