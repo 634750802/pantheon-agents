@@ -14,7 +14,6 @@ A rigorous, evidence-first workflow for resolving software issues or improving e
 3. **Review** → P0/P1 bug hunt on the changes
 4. **Verify** → Triage findings and scope decisions
 5. **Fix Loop** → Iterate until no in-scope blockers remain
-6. **Pre-merge Validation** → Build, test, and CI checks
 
 ## Prerequisites
 
@@ -314,7 +313,7 @@ IMPORTANT: Do NOT post PR comments or create GitHub issues in this step.
 
 1. Parse output
 2. Do NOT update `last_fix_branch_id` (Review is read-only)
-3. If `NO_P0_P1`: **Skip to Step 6** (Pre-merge Validation)
+3. If `NO_P0_P1`: **Workflow complete** (no blocking issues found)
 4. If `P0_P1_FINDINGS`: Extract findings, proceed to Step 4
 
 ---
@@ -444,7 +443,7 @@ END_IN_SCOPE_P0_P1
 
 1. Parse output
 2. Do NOT update `last_fix_branch_id` (Verify is read-only)
-3. If `NO_IN_SCOPE_P0_P1`: **Skip to Step 6** (Pre-merge Validation)
+3. If `NO_IN_SCOPE_P0_P1`: **Workflow complete** (all issues are deferred or invalid)
 4. If `IN_SCOPE_P0_P1`: Extract in-scope issues, proceed to Step 5
 
 ---
@@ -529,7 +528,7 @@ RETRY_PUSH_BRANCH={pr_head_branch}
 Repeat **Step 3** (Review) with `parent_branch_id = last_fix_branch_id`.
 
 Wait and parse output:
-- If `NO_P0_P1`: **Exit loop, proceed to Step 6**
+- If `NO_P0_P1`: **Exit loop, workflow complete**
 - If `P0_P1_FINDINGS`: Proceed to 5.3
 
 **5.3: Re-Verify**
@@ -537,83 +536,12 @@ Wait and parse output:
 Repeat **Step 4** (Verify) with `parent_branch_id = last_fix_branch_id`.
 
 Wait and parse output:
-- If `NO_IN_SCOPE_P0_P1`: **Exit loop, proceed to Step 6**
+- If `NO_IN_SCOPE_P0_P1`: **Exit loop, workflow complete**
 - If `IN_SCOPE_P0_P1`: Extract issues, go back to 5.1 (Fix again)
 
 **Loop termination**: Exit when either Review finds no P0/P1, or Verify finds no in-scope P0/P1.
 
 ---
-
-### Step 6: Pre-merge Validation
-
-**Purpose**: Final validation before merge (build, test, CI).
-
-**This step is NOT a Pantheon exploration** – run these checks in the main workflow (not inside codex).
-
-**6.1: Checkout PR Branch**
-
-```bash
-gh pr checkout {pr_number}
-# or: git checkout {pr_head_branch}
-```
-
-**6.2: Local Build & Test**
-
-Run project-specific build and smoke tests. Examples:
-
-For Rust projects:
-```bash
-cargo build --release
-cargo test
-```
-
-For other projects, adapt as needed.
-
-**If local validation fails**:
-- Treat failure as a new in-scope issue
-- Start a Fix exploration (Step 5.1) to address the failure
-- Re-run Review and Verify
-- Return to Step 6 after fixes
-
-**6.3: Wait for CI (Required Checks)**
-
-```bash
-gh pr checks {pr_number} --required --watch --fail-fast
-```
-
-**If CI fails**:
-
-1. List failed checks:
-   ```bash
-   gh pr checks {pr_number} --required
-   ```
-
-2. Inspect failure logs:
-   ```bash
-   gh run list --branch {pr_head_branch} --limit 20
-   gh run view <run-id> --log-failed
-   ```
-
-3. Determine failure cause:
-   - **Introduced by this PR**: Treat as in-scope issue, start Fix exploration
-   - **Flaky/infra issue** (not caused by this PR):
-     - Create or reuse GitHub issue to track (use same dedupe workflow as Step 4)
-     - Do NOT merge until CI is green
-     - Stop workflow
-
-4. If fix is needed:
-   - Start Fix exploration (Step 5.1)
-   - Re-run Review (Step 3) and Verify (Step 4) if needed
-   - Return to Step 6
-
-**6.4: Merge Decision**
-
-If all checks pass:
-- Local build ✅
-- Local tests ✅
-- CI required checks ✅
-
-**Workflow complete**. The PR is ready for merge (manual or automated based on project policy).
 
 ## Summary: Information Flow
 
@@ -628,7 +556,7 @@ Step 4 (Verify) ← receives P0_P1_FINDINGS
   ↓ outputs: IN_SCOPE_P0_P1 (or NO_IN_SCOPE_P0_P1)
 Step 5 (Fix Loop) ← receives IN_SCOPE_P0_P1
   ↓ iterates: Fix → Review → Verify
-Step 6 (Pre-merge) ← final validation
+  ↓ workflow complete when no in-scope P0/P1 remain
 ```
 
 ## Recovery & Error Handling
@@ -651,13 +579,6 @@ Handled automatically via `GH_AUTH_EXPIRED` output mode and recovery exploration
 If Step 2 outputs `IMPLEMENTATION_BLOCKED`:
 - The solution design from Step 1 is fundamentally flawed
 - Requires manual intervention or re-running Step 1 with more context
-
-### Infinite Loop Protection
-
-If Step 5 (Fix Loop) iterates more than **5 times**:
-- Log warning
-- Output summary of remaining issues
-- Stop workflow and escalate to user (may require different approach or manual intervention)
 
 ## Notes
 
