@@ -313,7 +313,9 @@ IMPORTANT: Do NOT post PR comments or create GitHub issues in this step.
 
 1. Parse output
 2. Do NOT update `last_fix_branch_id` (Review is read-only)
-3. If `NO_P0_P1`: **Workflow complete** (no blocking issues found)
+3. If `NO_P0_P1`:
+   - Post workflow completion comment (see "Workflow Completion Comment" below)
+   - **Workflow complete** (no blocking issues found)
 4. If `P0_P1_FINDINGS`: Extract findings, proceed to Step 4
 
 ---
@@ -443,7 +445,9 @@ END_IN_SCOPE_P0_P1
 
 1. Parse output
 2. Do NOT update `last_fix_branch_id` (Verify is read-only)
-3. If `NO_IN_SCOPE_P0_P1`: **Workflow complete** (all issues are deferred or invalid)
+3. If `NO_IN_SCOPE_P0_P1`:
+   - Post workflow completion comment (see "Workflow Completion Comment" below)
+   - **Workflow complete** (all issues are deferred or invalid)
 4. If `IN_SCOPE_P0_P1`: Extract in-scope issues, proceed to Step 5
 
 ---
@@ -528,7 +532,9 @@ RETRY_PUSH_BRANCH={pr_head_branch}
 Repeat **Step 3** (Review) with `parent_branch_id = last_fix_branch_id`.
 
 Wait and parse output:
-- If `NO_P0_P1`: **Exit loop, workflow complete**
+- If `NO_P0_P1`:
+  - Post workflow completion comment (see "Workflow Completion Comment" below)
+  - **Exit loop, workflow complete**
 - If `P0_P1_FINDINGS`: Proceed to 5.3
 
 **5.3: Re-Verify**
@@ -536,10 +542,45 @@ Wait and parse output:
 Repeat **Step 4** (Verify) with `parent_branch_id = last_fix_branch_id`.
 
 Wait and parse output:
-- If `NO_IN_SCOPE_P0_P1`: **Exit loop, workflow complete**
+- If `NO_IN_SCOPE_P0_P1`:
+  - Post workflow completion comment (see "Workflow Completion Comment" below)
+  - **Exit loop, workflow complete**
 - If `IN_SCOPE_P0_P1`: Extract issues, go back to 5.1 (Fix again)
 
 **Loop termination**: Exit when either Review finds no P0/P1, or Verify finds no in-scope P0/P1.
+
+---
+
+## Workflow Completion Comment
+
+When the workflow completes (no in-scope P0/P1 issues remain), post a completion comment on the PR:
+
+```bash
+gh pr comment {pr_number} --body "$(cat <<'EOF'
+## ✅ Pantheon Issue Resolution Complete
+
+This PR has been analyzed and iterated through the Fix/Review/Verify loop until no in-scope P0/P1 blockers remain.
+
+**Final Status:**
+- ✅ No P0/P1 blocking issues found in latest review
+- ✅ All identified issues have been either fixed or deferred to separate issues
+- ✅ PR is ready for final human review and merge
+
+**Workflow Summary:**
+- Issue analyzed: {issue_link}
+- PR created/updated: #{pr_number}
+- Review cycles completed: {number_of_review_cycles}
+
+---
+🤖 Automated by [pantheon-issue-resolve](https://github.com/pingcap-inc/pantheon-agents/tree/main/agents/skills/pantheon-issue-resolve)
+EOF
+)"
+```
+
+**Note**: Replace placeholders with actual values:
+- `{issue_link}`: The original issue link
+- `{pr_number}`: The PR number
+- `{number_of_review_cycles}`: Count of how many Review/Verify iterations were performed
 
 ---
 
