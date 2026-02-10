@@ -10,10 +10,10 @@ description: "Evidence-first issue resolution workflow: analyze deeply, implemen
 A rigorous, evidence-first workflow for resolving software issues or improving existing PRs. The workflow consists of:
 
 1. **Deep Analysis** → Understand root cause and design solution
-2. **Implementation** → Execute the solution design
+2. **Implementation** → Understand clearly, design the best fix strategy, then execute
 3. **Review** → P0/P1 bug hunt on the changes
 4. **Verify** → Triage findings and scope decisions
-5. **Fix Loop** → Iterate until no in-scope blockers remain
+5. **Fix Loop** → For each round, understand findings, design the best fix strategy, then execute until no in-scope blockers remain
 
 ## Prerequisites
 
@@ -225,7 +225,7 @@ END_SOLUTION_DESIGN
 
 ### Step 2: Implement Solution
 
-**Purpose**: Execute the solution design from Step 1 and create a new PR.
+**Purpose**: Implement with expert workflow discipline: understand first, design best strategy, then execute and create a new PR.
 
 **Note**: This step is **only executed when `entry_mode = "new_issue"`**. If `entry_mode = "existing_pr"`, skip this step (PR already exists).
 
@@ -243,11 +243,20 @@ The analysis phase has identified the following solution:
 
 {paste entire SOLUTION_DESIGN block from Step 1}
 
+=== WORKING METHOD (CRITICAL) ===
+
+Do not rush to write code.
+First, make sure you fully understand the issue and current behavior.
+Then, design the best fix strategy based on the solution design.
+You are a Linus bigfan: use KISS (accurate, rigorous, concise) to find the best simple, robust, minimal-change strategy.
+Only after the strategy is clear should you implement.
+If new constraints appear during implementation, pause and re-evaluate the strategy before continuing.
+
 === YOUR TASK: IMPLEMENT ===
 
 Implement the solution following the design above:
 
-1. Understand and follow the approach described in the design
+1. Follow the expert method above and the original solution design
 2. Apply KISS principle: accurate, rigorous, and concise
 3. Self-review your diff (correctness, edge cases, compatibility)
 4. Run the smallest relevant tests/build to verify basic functionality
@@ -537,18 +546,22 @@ Fix the following in-scope P0/P1 issues for PR #{pr_number}:
 
 === REQUIREMENTS ===
 
-1. Fix each issue using KISS principle: accurate, rigorous, concise
-2. Do NOT introduce new bugs or regressions
-3. Self-review your changes
-4. Run smallest relevant tests/build
+1. Do not rush into code changes
+2. First understand each finding and the affected code paths
+3. Then design the best fix strategy before editing: you are a Linus bigfan, and use KISS (accurate, rigorous, concise) to find the best simple, robust path
+4. If new constraints are discovered, pause and re-evaluate the strategy before continuing
+5. Fix each issue using KISS principle: accurate, rigorous, concise
+6. Do NOT introduce new bugs or regressions
+7. Self-review your changes
+8. Run smallest relevant tests/build
 
-5. PR Management:
+9. PR Management:
    - Do NOT create a new PR
    - Checkout existing PR branch: `gh pr checkout {pr_number}` (or `git checkout {pr_head_branch}`)
    - Commit your fixes
    - Push to existing branch: `git push`
 
-6. Handle GitHub CLI auth:
+10. Handle GitHub CLI auth:
    - If `gh` unauthorized: retry once
    - If still unauthorized: commit locally, output GH_AUTH_EXPIRED mode
 
@@ -574,17 +587,21 @@ Improve the existing PR #{pr_number} based on the following analysis:
 
 === REQUIREMENTS ===
 
-1. Implement improvements following the design using KISS principle
-2. Do NOT introduce new bugs or regressions
-3. Self-review your changes
-4. Run smallest relevant tests/build
+1. Do not rush into code changes
+2. First understand the current PR behavior and what needs improvement
+3. Then design the best improvement strategy before editing: you are a Linus bigfan, and use KISS (accurate, rigorous, concise) to find the best simple, robust path
+4. If new constraints are discovered, pause and re-evaluate the strategy before continuing
+5. Implement improvements following the design using KISS principle
+6. Do NOT introduce new bugs or regressions
+7. Self-review your changes
+8. Run smallest relevant tests/build
 
-5. PR Management:
+9. PR Management:
    - Checkout existing PR branch: `gh pr checkout {pr_number}` (or `git checkout {pr_head_branch}`)
    - Commit your improvements
    - Push to existing branch: `git push`
 
-6. Handle GitHub CLI auth:
+10. Handle GitHub CLI auth:
    - If `gh` unauthorized: retry once
    - If still unauthorized: commit locally, output GH_AUTH_EXPIRED mode
 
@@ -604,7 +621,7 @@ RETRY_PUSH_BRANCH={pr_head_branch}
 1. Set `last_fix_branch_id = <branch_id from this Fix run>`
 2. Increment `review_cycle_count += 1`
 
-4. If `GH_AUTH_EXPIRED`:
+3. If `GH_AUTH_EXPIRED`:
    - Start recovery exploration from `last_fix_branch_id`:
      ```
      Do NOT change code. Use existing local commits.
@@ -613,7 +630,7 @@ RETRY_PUSH_BRANCH={pr_head_branch}
      ```
    - Wait for completion
 
-5. Proceed to 5.2
+4. Proceed to 5.2
 
 **5.2: Re-Review**
 
