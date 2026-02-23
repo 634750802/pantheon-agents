@@ -1,19 +1,26 @@
 ---
 name: pantheon-issue-resolve
-description: "Evidence-first issue resolution workflow: analyze deeply, implement fixes, review rigorously (P0/P1 bug hunt), and verify scope until no blocking issues remain. Supports both new issues and existing PRs."
+description: "Implementation + review + verify + fix loop. Receives an approved solution design via GitHub comment link, implements the fix, hunts P0/P1 bugs, triages findings, and iterates until no blocking issues remain."
 ---
 
 # Pantheon Issue Resolve
 
 ## Overview
 
-A rigorous, evidence-first workflow for resolving software issues or improving existing PRs. The workflow consists of:
+A rigorous implementation and review workflow that takes an approved solution design and drives it to a merge-ready PR. The workflow consists of:
 
-1. **Deep Analysis** → Understand root cause and design solution
-2. **Implementation** → Understand clearly, design the best fix strategy, then execute
-3. **Review** → P0/P1 bug hunt on the changes
-4. **Verify** → Triage findings and scope decisions
-5. **Fix Loop** → For each round, understand findings, design the best fix strategy, then execute until no in-scope blockers remain
+1. **Implement** → Execute the approved design, create/update PR
+2. **Review** → P0/P1 bug hunt + CI check on the changes
+3. **Verify** → Triage findings and scope decisions
+4. **Fix Loop** → Iterate until no in-scope blockers remain
+
+This skill receives its design from `pantheon-solution-design`, which posts the final design as a GitHub issue comment.
+
+## Golden Rule
+
+> Don't patch, don't workaround, don't add legacy/fallback code. Design a clean architecture. Solve the task thoroughly.
+
+This rule applies to ALL prompts in this skill.
 
 ## Prerequisites
 
@@ -24,6 +31,7 @@ A rigorous, evidence-first workflow for resolving software issues or improving e
 - **P0/P1**: Critical/high-severity issues (see definitions below)
 - **In-scope**: Issues that must be fixed in this PR before merge
 - **Deferred**: Valid issues tracked in separate GitHub issues
+- **Design comment**: The GitHub issue comment containing the approved solution design (posted by `pantheon-solution-design`)
 
 ### Waiting/Polling Mechanism
 
@@ -75,7 +83,10 @@ All severity claims must include code-causal evidence + reachability analysis + 
    - `issue_link`: GitHub issue URL or identifier → set `entry_mode = "new_issue"`
    - `existing_pr_link`: GitHub PR URL or number → set `entry_mode = "existing_pr"`
 
-2. **Required Pantheon context:**
+2. **Design input:**
+   - `design_comment_link`: URL of the GitHub comment containing the final approved/consensus design (posted by `pantheon-solution-design`)
+
+3. **Required Pantheon context:**
    - `parent_branch_id`: Starting Pantheon branch ID (sandbox baseline)
 
 **Pre-workflow setup:**
@@ -95,26 +106,26 @@ If `entry_mode = "existing_pr"`:
 entry_mode = "new_issue" or "existing_pr"
 issue_link = <extracted from task>
 existing_pr_link = <extracted or None>
+design_comment_link = <extracted from task>
 
 # Branch tracking
 baseline_branch_id = parent_branch_id
-analysis_branch_id = None  # Set after Step 1
-last_fix_branch_id = None  # Set after Step 2 or skipped if existing_pr
+last_fix_branch_id = None  # Set after Step 1
 
-# PR tracking (pre-filled if existing_pr, otherwise set after Step 2)
+# PR tracking (pre-filled if existing_pr, otherwise set after Step 1)
 pr_number = <extracted or None>
 pr_url = <extracted or None>
 pr_head_branch = <extracted or None>
 
 # Metrics
-review_cycle_count = 0  # Increment each time Step 5.1 executes
+review_cycle_count = 0  # Increment each time Step 4.1 executes
 ```
 
 ## Workflow
 
-### Step 1: Deep Analysis
+### Step 1: Implement Solution
 
-**Purpose**: Sync code, analyze deeply, and design solution (or conclude no action needed).
+**Purpose**: Read the approved design from the GitHub comment, then implement with expert workflow discipline.
 
 **Call**: `functions.mcp__pantheon__parallel_explore`
 - `agent`: `"claude_code"`
@@ -123,140 +134,40 @@ review_cycle_count = 0  # Increment each time Step 5.1 executes
 
 **Construct prompt based on `entry_mode`:**
 
-**If `entry_mode = "new_issue"` (analyzing an issue):**
+**If `entry_mode = "new_issue"`:**
 
 ```
-=== PHASE 1: SYNC CODE ===
+=== GOLDEN RULE ===
+
+Don't patch, don't workaround, don't add legacy/fallback code. Design a clean architecture. Solve the task thoroughly.
+
+=== PHASE 1: READ THE APPROVED DESIGN ===
+
+Fetch the approved solution design from the GitHub issue comment:
+
+gh api "{design_comment_api_url}" --jq .body
+
+(where {design_comment_api_url} is the API URL derived from {design_comment_link})
+
+Read and internalize the full design — root cause, approach, files to change, edge cases, test strategy, and risks.
+
+=== PHASE 2: SYNC CODE ===
 
 Pull the latest code from master branch.
 
-=== PHASE 2: DEEP ANALYSIS ===
+=== PHASE 3: IMPLEMENT ===
 
-Analyze issue: {issue_link}
-
-Apply scientific rigor. Default stance: every claim may be invalid until evidence proves otherwise.
-
-1. Restate the issue claim precisely (expected vs actual, triggering inputs/config)
-2. Locate relevant code paths and exact conditions to reach them
-3. Determine reachability under default/common production configs
-4. Identify root cause with code-causal chain (why this, not alternatives)
-5. Search for counter-evidence (feature gates, guards, fallbacks, test-only paths, unreachable branches)
-6. Assess impact and blast radius (unavailability, correctness, data safety, security, performance)
-7. Check for broader systemic issues (same pattern elsewhere, shared abstractions)
-8. If the report mentions a failing test, identify the minimal failing case and rerun it on current HEAD to confirm repro (or prove non-repro)
-
-=== PHASE 3: CONCLUSION ===
-
-Output exactly ONE of:
-
---- Option A: No action needed ---
-VERDICT=NO_ACTION_NEEDED
-REASON=<brief explanation: not a bug / already fixed / duplicate / out of scope / test-only>
-
---- Option B: Action required ---
-VERDICT=NEED_FIX
-
-BEGIN_SOLUTION_DESIGN
-root_cause: <one-line root cause>
-severity: <P0 / P1 / P2 / feature>
-approach: <clear, concise solution using KISS principle; describe what to change and why>
-test_strategy: <how to verify the fix>
-risks: <potential risks or edge cases>
-alternatives_rejected: <why other approaches were not chosen>
-END_SOLUTION_DESIGN
-```
-
-**If `entry_mode = "existing_pr"` (analyzing an existing PR):**
-
-```
-=== PHASE 1: SYNC CODE ===
-
-Checkout the existing PR branch: {pr_head_branch}
-
-=== PHASE 2: DEEP ANALYSIS ===
-
-Analyze existing PR: {existing_pr_link}
-Associated issue (if any): {issue_link}
-
-Apply scientific rigor. Default stance: assume the PR may not need changes unless evidence proves otherwise.
-
-1. Understand the PR's intent and current implementation
-2. Analyze code changes (what changed, why, impact)
-3. Identify potential issues or improvement opportunities
-4. Assess code quality, edge cases, and compatibility
-5. If there's an associated failing test, rerun it on current PR HEAD to verify status
-
-=== PHASE 3: CONCLUSION ===
-
-Output exactly ONE of:
-
---- Option A: No action needed ---
-VERDICT=NO_ACTION_NEEDED
-REASON=<brief explanation: PR is good / already addresses issue / no improvements needed>
-
---- Option B: Action required ---
-VERDICT=NEED_FIX
-
-BEGIN_SOLUTION_DESIGN
-root_cause: <what needs improvement in the PR>
-severity: <P0 / P1 / P2 / enhancement>
-approach: <clear, concise improvement using KISS principle; describe what to change and why>
-test_strategy: <how to verify the improvement>
-risks: <potential risks or edge cases>
-alternatives_rejected: <why other approaches were not chosen>
-END_SOLUTION_DESIGN
-```
-
-**Wait for completion** (see Waiting/Polling), then:
-
-1. Parse output
-2. Set `analysis_branch_id = <branch_id from Step 1>`
-3. If `VERDICT=NO_ACTION_NEEDED`: **Stop workflow**
-4. If `VERDICT=NEED_FIX`:
-   - Extract `SOLUTION_DESIGN` block (everything between BEGIN and END)
-   - **If `entry_mode = "new_issue"`**: proceed to Step 2
-   - **If `entry_mode = "existing_pr"`**:
-     - Set `last_fix_branch_id = analysis_branch_id`
-     - Store the `SOLUTION_DESIGN` as if it were `IN_SCOPE_P0_P1` findings
-     - Skip Steps 2, 3, 4 (PR exists, no need to create/review/verify yet)
-     - Go directly to Step 5.1 (Fix) to implement the improvements on the existing PR
-
----
-
-### Step 2: Implement Solution
-
-**Purpose**: Implement with expert workflow discipline: understand first, design best strategy, then execute and create a new PR.
-
-**Note**: This step is **only executed when `entry_mode = "new_issue"`**. If `entry_mode = "existing_pr"`, skip this step (PR already exists).
-
-**Call**: `functions.mcp__pantheon__parallel_explore`
-- `agent`: `"claude_code"`
-- `num_branches`: `1`
-- `parent_branch_id`: `analysis_branch_id`
-
-**Prompt**:
-
-```
-=== CONTEXT: SOLUTION DESIGN ===
-
-The analysis phase has identified the following solution:
-
-{paste entire SOLUTION_DESIGN block from Step 1}
-
-=== WORKING METHOD (CRITICAL) ===
-
+WORKING METHOD (CRITICAL):
 Do not rush to write code.
-First, make sure you fully understand the issue and current behavior.
-Then, design the best fix strategy based on the solution design.
+First, make sure you fully understand the issue and the approved design.
+Then, design the best implementation strategy based on the solution design.
 You are a Linus bigfan: use KISS (accurate, rigorous, concise) to find the best simple, robust, minimal-change strategy.
 Only after the strategy is clear should you implement.
 If new constraints appear during implementation, pause and re-evaluate the strategy before continuing.
 
-=== YOUR TASK: IMPLEMENT ===
+Implement the solution following the approved design:
 
-Implement the solution following the design above:
-
-1. Follow the expert method above and the original solution design
+1. Follow the expert method above and the approved solution design
 2. Apply KISS principle: accurate, rigorous, and concise
 3. Self-review your diff (correctness, edge cases, compatibility)
 4. Run the smallest relevant tests/build to verify basic functionality
@@ -284,17 +195,80 @@ RETRY_PUSH_BRANCH=<branch>
 
 --- Implementation blocked mode (use ONLY if design is fundamentally flawed) ---
 IMPLEMENTATION_BLOCKED
-REASON=<why the design doesn't work; requires re-analysis>
+REASON=<why the design doesn't work; requires re-design>
+```
+
+**If `entry_mode = "existing_pr"`:**
+
+```
+=== GOLDEN RULE ===
+
+Don't patch, don't workaround, don't add legacy/fallback code. Design a clean architecture. Solve the task thoroughly.
+
+=== PHASE 1: READ THE APPROVED DESIGN ===
+
+Fetch the approved solution design from the GitHub issue comment:
+
+gh api "{design_comment_api_url}" --jq .body
+
+Read and internalize the full design — root cause, approach, files to change, edge cases, test strategy, and risks.
+
+=== PHASE 2: SYNC CODE ===
+
+Checkout the existing PR branch: {pr_head_branch}
+
+=== PHASE 3: IMPLEMENT ===
+
+WORKING METHOD (CRITICAL):
+Do not rush to write code.
+First, understand the current PR and the approved design for improvements.
+Then, design the best implementation strategy.
+You are a Linus bigfan: use KISS (accurate, rigorous, concise) to find the best simple, robust path.
+Only after the strategy is clear should you implement.
+If new constraints appear during implementation, pause and re-evaluate the strategy before continuing.
+
+Implement the improvements following the approved design:
+
+1. Follow the expert method above and the approved solution design
+2. Apply KISS principle: accurate, rigorous, and concise
+3. Self-review your diff (correctness, edge cases, compatibility)
+4. Run the smallest relevant tests/build to verify basic functionality
+5. PR Management:
+   - Checkout existing PR branch: `gh pr checkout {pr_number}` (or `git checkout {pr_head_branch}`)
+   - Commit your changes
+   - Push to existing branch: `git push`
+6. Handle GitHub CLI auth:
+   - If `gh` is unauthorized (token expired/invalid), retry once
+   - If still unauthorized: commit locally, keep the branch, and output GH_AUTH_EXPIRED mode
+
+=== OUTPUT ===
+
+Output exactly ONE of the following modes:
+
+--- Success mode ---
+IMPLEMENTATION_SUCCESS
+PR_URL=<url>
+PR_NUMBER=<number>
+PR_HEAD_BRANCH=<branch>
+
+--- GH auth expired mode ---
+GH_AUTH_EXPIRED
+LOCAL_COMMIT=<sha>
+RETRY_PUSH_BRANCH={pr_head_branch}
+
+--- Implementation blocked mode (use ONLY if design is fundamentally flawed) ---
+IMPLEMENTATION_BLOCKED
+REASON=<why the design doesn't work; requires re-design>
 ```
 
 **Wait for completion**, then:
 
 1. Parse output
-2. Set `last_fix_branch_id = <branch_id from Step 2>`
+2. Set `last_fix_branch_id = <branch_id from Step 1>`
 
 3. If `IMPLEMENTATION_SUCCESS`:
    - Extract and store `pr_url`, `pr_number`, `pr_head_branch`
-   - Proceed to Step 3
+   - Proceed to Step 2
 
 4. If `GH_AUTH_EXPIRED`:
    - Start ONE recovery exploration from `last_fix_branch_id`:
@@ -309,17 +283,22 @@ REASON=<why the design doesn't work; requires re-analysis>
      PR_NUMBER=<number>
      PR_HEAD_BRANCH=<branch>
      ```
-   - Wait for completion, extract PR info, proceed to Step 3
+   - Wait for completion, extract PR info, proceed to Step 2
 
 5. If `IMPLEMENTATION_BLOCKED`:
    - Log the reason
-   - **Stop workflow** (requires re-analysis or user intervention)
+   - **Output to orchestrator**:
+     ```
+     IMPLEMENTATION_BLOCKED
+     REASON=<reason>
+     ```
+   - The orchestrator should re-run the design skill with the blocker as additional context
 
 ---
 
-### Step 3: Review (P0/P1 Bug Hunt)
+### Step 2: Review (P0/P1 Bug Hunt + CI Check)
 
-**Purpose**: Rigorously review the PR changes for critical issues.
+**Purpose**: Rigorously review the PR changes for critical issues and verify CI status.
 
 **Call**: `functions.mcp__pantheon__parallel_explore`
 - `agent`: `"codex"`
@@ -329,6 +308,10 @@ REASON=<why the design doesn't work; requires re-analysis>
 **Prompt**:
 
 ```
+=== GOLDEN RULE ===
+
+Don't patch, don't workaround, don't add legacy/fallback code. Design a clean architecture. Solve the task thoroughly.
+
 Review PR #{pr_number} (related to: {issue_link}) with scientific rigor.
 
 === REVIEW PRINCIPLES ===
@@ -347,9 +330,19 @@ Review PR #{pr_number} (related to: {issue_link}) with scientific rigor.
 6. Security: Are there security vulnerabilities (injection, XSS, auth bypass, etc.)?
 7. Testing: If the original issue was a failing test, rerun that test on the current PR HEAD to verify the fix
 
+=== CI STATUS CHECK ===
+
+Check the CI status of the PR:
+
+gh pr checks {pr_number} --watch --fail-fast
+
+If CI is still running, wait for it to complete. Report any CI failures as findings:
+- If a CI failure is caused by the PR changes: report as P0/P1 finding with evidence
+- If a CI failure is a known flaky test or pre-existing failure: note it but do NOT report as P0/P1
+
 === OUTPUT ===
 
-If you find any P0 or P1 issues, output:
+If you find any P0 or P1 issues (including CI failures caused by PR changes), output:
 
 P0_P1_FINDINGS
 BEGIN_P0_P1_FINDINGS
@@ -374,11 +367,11 @@ IMPORTANT: Do NOT post PR comments or create GitHub issues in this step.
 3. If `NO_P0_P1`:
    - Post workflow completion comment (see "Workflow Completion Comment" below)
    - **Workflow complete** (no blocking issues found)
-4. If `P0_P1_FINDINGS`: Extract findings, proceed to Step 4
+4. If `P0_P1_FINDINGS`: Extract findings, proceed to Step 3
 
 ---
 
-### Step 4: Verify (Triage & Scope)
+### Step 3: Verify (Triage & Scope)
 
 **Purpose**: Validate findings and decide what must be fixed in this PR vs deferred.
 
@@ -390,11 +383,15 @@ IMPORTANT: Do NOT post PR comments or create GitHub issues in this step.
 **Prompt**:
 
 ```
+=== GOLDEN RULE ===
+
+Don't patch, don't workaround, don't add legacy/fallback code. Design a clean architecture. Solve the task thoroughly.
+
 Verify the P0/P1 findings from the review for PR #{pr_number}.
 
 === INPUT: REVIEW FINDINGS ===
 
-{paste entire content between BEGIN_P0_P1_FINDINGS and END_P0_P1_FINDINGS from Step 3}
+{paste entire content between BEGIN_P0_P1_FINDINGS and END_P0_P1_FINDINGS from Step 2}
 
 === VERIFICATION PRINCIPLES ===
 
@@ -477,13 +474,13 @@ Post ONE summary comment on the PR (idempotent per PR HEAD SHA):
 
 ## Review Verification Summary
 
-### ✅ FIX_IN_THIS_PR (blocking merge)
+### FIX_IN_THIS_PR (blocking merge)
 <list each item with: severity, brief rationale, difficulty/risk>
 
-### 📋 DEFER_CREATE_ISSUE (tracked separately)
+### DEFER_CREATE_ISSUE (tracked separately)
 <list each item with: issue link, brief rationale>
 
-### ❌ INVALID_OR_ALREADY_FIXED
+### INVALID_OR_ALREADY_FIXED
 <brief rationale for each>
 EOF
 
@@ -506,11 +503,11 @@ END_IN_SCOPE_P0_P1
 3. If `NO_IN_SCOPE_P0_P1`:
    - Post workflow completion comment (see "Workflow Completion Comment" below)
    - **Workflow complete** (all issues are deferred or invalid)
-4. If `IN_SCOPE_P0_P1`: Extract in-scope issues, proceed to Step 5
+4. If `IN_SCOPE_P0_P1`: Extract in-scope issues, proceed to Step 4
 
 ---
 
-### Step 5: Fix Loop (Iterate Until Clean)
+### Step 4: Fix Loop (Iterate Until Clean)
 
 **Purpose**: Fix in-scope P0/P1 issues, then re-review until clean.
 
@@ -519,30 +516,32 @@ END_IN_SCOPE_P0_P1
 ```
 WHILE in-scope P0/P1 issues exist:
     1. Fix the issues
-    2. Review again (Step 3)
+    2. Review again (Step 2)
     3. If NO_P0_P1: break
-    4. Verify again (Step 4)
+    4. Verify again (Step 3)
     5. If NO_IN_SCOPE_P0_P1: break
 END WHILE
 ```
 
-**5.1: Fix In-Scope Issues**
+**4.1: Fix In-Scope Issues**
 
 **Call**: `functions.mcp__pantheon__parallel_explore`
 - `agent`: `"claude_code"`
 - `num_branches`: `1`
 - `parent_branch_id`: `last_fix_branch_id`
 
-**Construct prompt based on context:**
-
-**If coming from Step 4 (Verify) - normal Fix loop:**
+**Prompt**:
 
 ```
+=== GOLDEN RULE ===
+
+Don't patch, don't workaround, don't add legacy/fallback code. Design a clean architecture. Solve the task thoroughly.
+
 Fix the following in-scope P0/P1 issues for PR #{pr_number}:
 
 === ISSUES TO FIX ===
 
-{paste entire content between BEGIN_IN_SCOPE_P0_P1 and END_IN_SCOPE_P0_P1 from Step 4}
+{paste entire content between BEGIN_IN_SCOPE_P0_P1 and END_IN_SCOPE_P0_P1 from Step 3}
 
 === REQUIREMENTS ===
 
@@ -576,46 +575,6 @@ LOCAL_COMMIT=<sha>
 RETRY_PUSH_BRANCH={pr_head_branch}
 ```
 
-**If coming from Step 1 with `entry_mode = "existing_pr"` - first improvement:**
-
-```
-Improve the existing PR #{pr_number} based on the following analysis:
-
-=== SOLUTION DESIGN ===
-
-{paste entire SOLUTION_DESIGN block from Step 1}
-
-=== REQUIREMENTS ===
-
-1. Do not rush into code changes
-2. First understand the current PR behavior and what needs improvement
-3. Then design the best improvement strategy before editing: you are a Linus bigfan, and use KISS (accurate, rigorous, concise) to find the best simple, robust path
-4. If new constraints are discovered, pause and re-evaluate the strategy before continuing
-5. Implement improvements following the design using KISS principle
-6. Do NOT introduce new bugs or regressions
-7. Self-review your changes
-8. Run smallest relevant tests/build
-
-9. PR Management:
-   - Checkout existing PR branch: `gh pr checkout {pr_number}` (or `git checkout {pr_head_branch}`)
-   - Commit your improvements
-   - Push to existing branch: `git push`
-
-10. Handle GitHub CLI auth:
-   - If `gh` unauthorized: retry once
-   - If still unauthorized: commit locally, output GH_AUTH_EXPIRED mode
-
-=== OUTPUT ===
-
-Success mode:
-FIX_SUCCESS
-
-GH auth expired mode:
-GH_AUTH_EXPIRED
-LOCAL_COMMIT=<sha>
-RETRY_PUSH_BRANCH={pr_head_branch}
-```
-
 **Wait for completion**, then:
 
 1. Set `last_fix_branch_id = <branch_id from this Fix run>`
@@ -630,27 +589,27 @@ RETRY_PUSH_BRANCH={pr_head_branch}
      ```
    - Wait for completion
 
-4. Proceed to 5.2
+4. Proceed to 4.2
 
-**5.2: Re-Review**
+**4.2: Re-Review**
 
-Repeat **Step 3** (Review) with `parent_branch_id = last_fix_branch_id`.
+Repeat **Step 2** (Review) with `parent_branch_id = last_fix_branch_id`.
 
 Wait and parse output:
 - If `NO_P0_P1`:
   - Post workflow completion comment (see "Workflow Completion Comment" below)
   - **Exit loop, workflow complete**
-- If `P0_P1_FINDINGS`: Proceed to 5.3
+- If `P0_P1_FINDINGS`: Proceed to 4.3
 
-**5.3: Re-Verify**
+**4.3: Re-Verify**
 
-Repeat **Step 4** (Verify) with `parent_branch_id = last_fix_branch_id`.
+Repeat **Step 3** (Verify) with `parent_branch_id = last_fix_branch_id`.
 
 Wait and parse output:
 - If `NO_IN_SCOPE_P0_P1`:
   - Post workflow completion comment (see "Workflow Completion Comment" below)
   - **Exit loop, workflow complete**
-- If `IN_SCOPE_P0_P1`: Extract issues, go back to 5.1 (Fix again)
+- If `IN_SCOPE_P0_P1`: Extract issues, go back to 4.1 (Fix again)
 
 **Loop termination**: Exit when either Review finds no P0/P1, or Verify finds no in-scope P0/P1.
 
@@ -662,14 +621,14 @@ When the workflow completes (no in-scope P0/P1 issues remain), post a completion
 
 ```bash
 gh pr comment {pr_number} --body "$(cat <<'EOF'
-## ✅ Pantheon Issue Resolution Complete
+## Pantheon Issue Resolution Complete
 
 This PR has been analyzed and iterated through the Fix/Review/Verify loop until no in-scope P0/P1 blockers remain.
 
 **Final Status:**
-- ✅ No P0/P1 blocking issues found in latest review
-- ✅ All identified issues have been either fixed or deferred to separate issues
-- ✅ PR is ready for final human review and merge
+- No P0/P1 blocking issues found in latest review
+- All identified issues have been either fixed or deferred to separate issues
+- PR is ready for final human review and merge
 
 **Workflow Summary:**
 - Issue analyzed: {issue_link}
@@ -677,7 +636,7 @@ This PR has been analyzed and iterated through the Fix/Review/Verify loop until 
 - Review cycles completed: {review_cycle_count}
 
 ---
-🤖 Automated by [pantheon-issue-resolve](https://github.com/pingcap-inc/pantheon-agents/tree/main/agents/skills/pantheon-issue-resolve)
+Automated by [pantheon-issue-resolve](https://github.com/pingcap-inc/pantheon-agents/tree/main/skills/pantheon-issue-resolve)
 EOF
 )"
 ```
@@ -692,15 +651,13 @@ EOF
 ## Summary: Information Flow
 
 ```
-Step 1 (Analyze)
-  ↓ outputs: SOLUTION_DESIGN
-Step 2 (Implement) ← receives SOLUTION_DESIGN
+Step 1 (Implement) ← reads design from design_comment_link
   ↓ outputs: PR info (pr_number, pr_url, pr_head_branch)
-Step 3 (Review) ← knows PR info
+Step 2 (Review + CI Check) ← knows PR info
   ↓ outputs: P0_P1_FINDINGS (or NO_P0_P1)
-Step 4 (Verify) ← receives P0_P1_FINDINGS
+Step 3 (Verify) ← receives P0_P1_FINDINGS
   ↓ outputs: IN_SCOPE_P0_P1 (or NO_IN_SCOPE_P0_P1)
-Step 5 (Fix Loop) ← receives IN_SCOPE_P0_P1
+Step 4 (Fix Loop) ← receives IN_SCOPE_P0_P1
   ↓ iterates: Fix → Review → Verify
   ↓ workflow complete when no in-scope P0/P1 remain
 ```
@@ -718,18 +675,19 @@ If a Pantheon branch fails (status = `failed`):
 
 ### GitHub Auth Failures
 
-Handled automatically via `GH_AUTH_EXPIRED` output mode and recovery explorations (see Step 2 and Step 5.1).
+Handled automatically via `GH_AUTH_EXPIRED` output mode and recovery explorations (see Step 1 and Step 4.1).
 
 ### Implementation Blocked
 
-If Step 2 outputs `IMPLEMENTATION_BLOCKED`:
-- The solution design from Step 1 is fundamentally flawed
-- Requires manual intervention or re-running Step 1 with more context
+If Step 1 outputs `IMPLEMENTATION_BLOCKED`:
+- The solution design is fundamentally flawed
+- The orchestrator (AGENTS.md) should re-run `pantheon-solution-design` with the blocker reason as additional context
 
 ## Notes
 
 - **Agent selection**:
-  - Steps 1, 2, 5.1 (Analysis, Implementation, Fix): Use `agent="claude_code"` for coding tasks
-  - Steps 3, 4 (Review, Verify): Use `agent="codex"` for analytical/review tasks
+  - Steps 1, 4.1 (Implementation, Fix): Use `agent="claude_code"` for coding tasks
+  - Steps 2, 3 (Review, Verify): Use `agent="codex"` for analytical/review tasks
+- **Design input**: The agent reads the design from `design_comment_link` using `gh api` — GitHub is the work ledger, not prompt blobs
 - **Sequential explorations**: This workflow uses sequential explorations by design (each depends on previous results)
 - **Extensibility**: This workflow can be extended to support refactoring, performance optimization, or feature development (not just bug fixes)
