@@ -17,17 +17,13 @@ ROLE="$1"
 SKILLS="$2"
 PROTOTYPE_REPO="${3:-https://github.com/pingcap-inc/pantheon-agents}"
 
-# Create codex dir
-mkdir -p "${WORK_DIR}/.codex"
+# Create claude dir
+mkdir -p "${WORK_DIR}/.claude"
 
 echo Pantheon Agent: Setup "$ROLE" from "$PROTOTYPE_REPO" with skills: "$SKILLS"
 
-# Install latest version of codex
-source "$NVM_DIR/nvm.sh"
-npm install -g @openai/codex >/dev/null 2>/dev/null
-
 # Print the version
-echo "Pantheon Agent: Installed codex $(codex --version)"
+echo "Pantheon Agent: Installed claude code $(claude --version)"
 
 PROTOTYPE_DIR=$(mktemp -d)
 
@@ -55,10 +51,10 @@ function copy_file_or_directory () {
   fi
 }
 
-echo Pantheon Agent: Copying AGENTS.md
-copy_file_or_directory "agents/$ROLE/AGENTS.md" "AGENTS.md"
+echo Pantheon Agent: Copying CLAUDE.md
+copy_file_or_directory "agents/$ROLE/AGENTS.md" "CLAUDE.md"
 
-mkdir -p "$WORK_DIR/.codex/skills"
+mkdir -p "$WORK_DIR/.claude/skills"
 
 IFS=',' read -r -a SKILL_ARRAY <<< "$SKILLS"
 
@@ -70,5 +66,5 @@ for skill in "${SKILL_ARRAY[@]}"; do
   fi
 
   echo Pantheon Agent: Copying skills/$skill
-  copy_file_or_directory "skills/$skill" ".codex/skills/$skill"
+  copy_file_or_directory "skills/$skill" ".claude/skills/$skill"
 done
